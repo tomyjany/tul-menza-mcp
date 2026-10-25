@@ -38,7 +38,8 @@ def account():
         fd = os.open(state / "account.lock", os.O_CREAT | os.O_RDWR, 0o600)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX)
-            client = MenzaClient(username, password, state_dir=state)
+            from .budget import SpendGuard
+            client = MenzaClient(username, password, state_dir=state, spend_guard=SpendGuard(state))
             try:
                 yield client
             finally:

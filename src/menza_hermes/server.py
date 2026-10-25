@@ -76,9 +76,12 @@ def orders() -> list[dict]:
 
 @tool
 def balance() -> dict:
-    """Account credit in CZK and available subsidy vouchers."""
+    """Account credit in CZK, subsidy vouchers, and the server-enforced 24h purchase limit usage."""
     with account() as client:
-        return client.balance()
+        result = client.balance()
+        if client._spend_guard is not None:
+            result["purchase_limit"] = client._spend_guard.usage()
+        return result
 
 
 def history_dates(since: str | None, until: str | None):

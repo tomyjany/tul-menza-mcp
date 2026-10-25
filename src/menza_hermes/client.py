@@ -55,9 +55,11 @@ def _same_order(a: Order, b: Order) -> bool:
 
 
 class MenzaClient:
-    def __init__(self, username: str, password: str, *, state_dir: Path, timeout: float = 30.0):
+    def __init__(self, username: str, password: str, *, state_dir: Path, timeout: float = 30.0,
+                 spend_guard=None):
         self.username = username
         self._password = password
+        self._spend_guard = spend_guard  # callable(price) that raises before an order POST
         self.timeout = timeout
         self.state_dir = Path(state_dir)
         self.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -191,6 +193,9 @@ class MenzaClient:
             return fresh
         if not fresh.orderable or fresh.buy_until is None or fresh.phase(datetime.now(PRAGUE)) == "closed":
             raise MenzaError("meal is no longer open for ordering")
+        if self._spend_guard is not None:
+            # Counted before the POST: an uncertain outcome still consumes budget.
+            self._spend_guard(fresh.price)
         uncertain = False
         try:
             self._action(f"/{slug}/{day.isoformat()}/",
