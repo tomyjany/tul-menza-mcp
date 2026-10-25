@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "menza-hermes"
+version = "0.1.0"
+description = "MCP server for the TUL canteen (menza.tul.cz): orders, burza watcher, history stats and order suggestions."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = [
+  "beautifulsoup4>=4.12",
+  "mcp>=2.3,<3",
+  "python-dotenv>=1.0",
+  "requests>=2.31",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+menza-hermes = "menza_hermes.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/menza_hermes"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

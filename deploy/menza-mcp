@@ -1,0 +1,9 @@
+#!/bin/sh
+# Root-owned, invoked with NO arguments as the isolated menza user.
+# Ignore caller cwd, environment, Python import paths and credential-file overrides.
+[ "$#" -eq 0 ] || exit 64
+cd /opt/menza-hermes || exit 1
+umask 077
+exec /usr/bin/env -i HOME=/var/lib/menza-hermes PATH=/usr/bin:/bin LANG=C.UTF-8 \
+    MENZA_ENV_FILE=/etc/menza-hermes/credentials.env MENZA_STATE_DIR=/var/lib/menza-hermes/state \
+    /opt/menza-hermes/.venv/bin/python -I -m menza_hermes.cli serve

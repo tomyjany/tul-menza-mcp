@@ -1,0 +1,33 @@
+[Unit]
+Description=TUL Menza bounded burza watcher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=menza
+Group=menza
+WorkingDirectory=/opt/menza-hermes
+Environment=HOME=/var/lib/menza-hermes
+Environment=MENZA_ENV_FILE=/etc/menza-hermes/credentials.env
+Environment=MENZA_STATE_DIR=/var/lib/menza-hermes/state
+ExecStart=/opt/menza-hermes/.venv/bin/python -I -m menza_hermes.cli watcher
+Restart=on-failure
+RestartSec=20
+RestartPreventExitStatus=78
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/menza-hermes/state
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target
