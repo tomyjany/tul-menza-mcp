@@ -27,7 +27,7 @@ from .models import PRAGUE, Meal, meal_slot
 
 DEFAULT_PER_SLOT = 1
 DEFAULT_MAX_MEAL_CZK = 150.0
-DEFAULT_MAX_CZK_14D = 2000.0
+DEFAULT_MAX_CZK_14D = 3000.0
 WINDOW = timedelta(days=14)
 
 
