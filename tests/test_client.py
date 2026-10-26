@@ -64,6 +64,21 @@ def client(tmp_path, reads, writes=()):
     return c
 
 
+def test_site_refusal_frees_budget_but_uncertain_outcome_keeps_it(tmp_path):
+    from menza_hermes.budget import SpendGuard
+    guard = SpendGuard(tmp_path)
+    refused = client(tmp_path, [menu(), menu()], [response('Sold out', status=412)])
+    refused._spend_guard = guard
+    with pytest.raises(MenzaError, match='refused'):
+        refused.order('harcov', DAY, 7, max_price=100)
+    assert guard.usage()['spent_14d'] == 0
+    unsure = client(tmp_path, [menu(), menu(), menu()], [requests.Timeout('x')])
+    unsure._spend_guard = guard
+    with pytest.raises(MenzaError, match='uncertain'):
+        unsure.order('harcov', DAY, 7, max_price=100)
+    assert guard.usage()['spent_14d'] == 58.84
+
+
 def test_history_post_accepts_table_only_fragment_without_logged_in_nav(tmp_path):
     fragment = ('<table><tr><th>When</th><th>Kind</th><th>Amount</th><th>Place</th></tr>'
                 '<tr><td>2026-10-26 12:00:00</td><td>Obědy</td>'

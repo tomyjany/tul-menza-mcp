@@ -59,7 +59,7 @@ class MenzaClient:
                  spend_guard=None):
         self.username = username
         self._password = password
-        self._spend_guard = spend_guard  # callable(price) that raises before an order POST
+        self._spend_guard = spend_guard  # SpendGuard-like: reserve/confirm/release before and after the POST
         self.timeout = timeout
         self.state_dir = Path(state_dir)
         self.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -193,21 +193,27 @@ class MenzaClient:
             return fresh
         if not fresh.orderable or fresh.buy_until is None or fresh.phase(datetime.now(PRAGUE)) == "closed":
             raise MenzaError("meal is no longer open for ordering")
-        if self._spend_guard is not None:
-            # Counted before the POST: an uncertain outcome still consumes budget.
-            self._spend_guard(fresh.price)
+        reservation = self._spend_guard.reserve(fresh) if self._spend_guard is not None else None
         uncertain = False
         try:
             self._action(f"/{slug}/{day.isoformat()}/",
                          {"ORDER": "", "JID": str(menu_id), "CANTEEN": str(fresh.canteen_id)})
         except _UncertainAction:
             uncertain = True
+        except MenzaError:
+            # 412: the site refused the order outright, so nothing was bought.
+            if reservation is not None:
+                self._spend_guard.release(reservation)
+            raise
         try:
             confirmed = [m for m in self.day(slug, day) if _same_meal(fresh, m) and m.order_id is not None]
         except (MenzaError, ValueError):
             raise MenzaError("order outcome is uncertain; check orders before trying again") from None
         if len(confirmed) == 1:
+            if reservation is not None:
+                self._spend_guard.confirm(reservation, confirmed[0].order_id)
             return confirmed[0]
+        # Unconfirmed outcomes keep their reservation (budget stays used) on purpose.
         if uncertain:
             raise MenzaError("order outcome is uncertain; check orders before trying again")
         raise MenzaError("order was not confirmed by the site; do not repeat automatically")

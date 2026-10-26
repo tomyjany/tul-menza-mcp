@@ -1,28 +1,57 @@
+from dataclasses import replace
 from datetime import datetime, timedelta
 
 import pytest
 
 from menza_hermes.budget import SpendGuard
 from menza_hermes.client import MenzaError
-from menza_hermes.models import PRAGUE
+from menza_hermes.models import PRAGUE, Meal
 
 NOW = datetime(2027, 3, 15, 12, tzinfo=PRAGUE)
 
 
-def test_limits_purchase_count_and_amount_in_rolling_day(tmp_path):
-    guard = SpendGuard(tmp_path, max_purchases=2, max_czk=150)
-    guard(80, NOW)
-    with pytest.raises(MenzaError, match="limit"):
-        guard(80, NOW + timedelta(minutes=1))  # 160 > 150
-    guard(70, NOW + timedelta(minutes=2))
-    with pytest.raises(MenzaError, match="limit"):
-        guard(1, NOW + timedelta(minutes=3))  # third purchase
-    guard(80, NOW + timedelta(hours=24, seconds=1))  # first purchase left the window
+def meal(days_ahead=1, section="lunch", price=90.0):
+    return Meal(NOW.date() + timedelta(days=days_ahead), 2, section, "1", "Synthetic dish", price, "150g",
+                5, None, False, NOW + timedelta(days=days_ahead - 1), NOW + timedelta(days=days_ahead))
 
 
-def test_limit_survives_new_process_and_refused_attempt_is_not_counted(tmp_path):
-    SpendGuard(tmp_path, max_purchases=2, max_czk=250)(100, NOW)
-    second = SpendGuard(tmp_path, max_purchases=2, max_czk=250)
+def test_confirmed_full_14_day_plan_fits_default_limits(tmp_path):
+    guard = SpendGuard(tmp_path)
+    weekdays = [d for d in range(1, 15) if (NOW.date() + timedelta(days=d)).weekday() < 5]
+    for d in weekdays:
+        guard.reserve(meal(d, "lunch", 95), NOW)
+        guard.reserve(meal(d, "dinner", 70), NOW)
+    assert guard.usage(NOW)["spent_14d"] == round(len(weekdays) * 165, 2)
+
+
+def test_second_lunch_for_same_date_is_refused_but_dinner_is_not(tmp_path):
+    guard = SpendGuard(tmp_path)
+    guard.reserve(meal(3, "lunch"), NOW)
+    guard.reserve(meal(3, "dinner"), NOW)
+    with pytest.raises(MenzaError, match="lunch purchase"):
+        guard.reserve(meal(3, "lunch_no_soup"), NOW)  # soup variant is still a lunch
+    with pytest.raises(MenzaError, match="dinner purchase"):
+        guard.reserve(meal(3, "dinner"), NOW)
+
+
+def test_per_meal_price_and_14_day_amount(tmp_path):
+    guard = SpendGuard(tmp_path, max_czk_14d=200)
+    with pytest.raises(MenzaError, match="per-meal"):
+        guard.reserve(meal(1, price=151), NOW)
+    guard.reserve(meal(1, price=120), NOW)
+    with pytest.raises(MenzaError, match="14 days"):
+        guard.reserve(meal(2, price=90), NOW)
+    guard.reserve(meal(2, price=90), NOW + timedelta(days=14, seconds=1))  # first purchase left the window
+
+
+def test_only_definitive_refusal_or_confirmed_refund_frees_budget(tmp_path):
+    guard = SpendGuard(tmp_path)
+    refused = guard.reserve(meal(4), NOW)
+    guard.release(refused)  # site said no: nothing bought
+    bought = guard.reserve(meal(4), NOW)
+    guard.confirm(bought, order_id=77)
     with pytest.raises(MenzaError):
-        second(200, NOW)
-    assert second.usage(NOW)["purchases_24h"] == 1
+        guard.reserve(meal(4), NOW)
+    guard.release_refunded(77)  # refund confirmed in balance
+    guard.reserve(meal(4), NOW)
+    assert SpendGuard(tmp_path).usage(NOW)["spent_14d"] == 90  # persists across processes

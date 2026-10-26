@@ -162,6 +162,8 @@ def cancel_or_sell(order_id: int, sell: bool, confirmed: bool):
         credit_change = round(after_balance["balance"] - before_balance, 2)
         if not sell and credit_change <= 0:
             raise MenzaError("Order removed but refund not yet confirmed in balance; inspect account before further purchases")
+        if not sell and client._spend_guard is not None:
+            client._spend_guard.release_refunded(order_id)
         return {"status": "offered_on_burza" if exchange else "removed",
                 "credit_change": credit_change, "refund_confirmed": not sell and credit_change > 0,
                 "orders": [o.to_dict(now) for o in remaining], "account": after_balance}
