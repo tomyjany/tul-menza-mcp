@@ -7,12 +7,14 @@ transaction prices do not establish whether somebody wanted soup.
 
 from __future__ import annotations
 
+import os
 from collections import Counter
 from datetime import date, timedelta
 
-from .models import CANTEENS, Meal, Transaction, normalize
+from .models import CANTEEN_NAMES, CANTEENS, Meal, Transaction, normalize
 
-_LUNCH_CANTEENS = ("harcov", "husova")
+DEFAULT_LUNCH_CANTEENS = ("harcov", "husova")
+DEFAULT_DINNER_CANTEEN = "harcov"
 _STOP_WORDS = frozenset({"a", "bez", "do", "g", "na", "s", "se", "v", "z", "ze"})
 
 
@@ -20,14 +22,25 @@ def _words(name: str) -> frozenset[str]:
     return frozenset(normalize(name).split()) - _STOP_WORDS
 
 
-def _place(place: str) -> str | None:
+def _place(place: str, candidates=tuple(CANTEENS)) -> str | None:
     # History often prefixes the canteen name with "Menza"; do not count
-    # unidentified locations as evidence for either lunch canteen.
+    # unidentified locations as evidence for any canteen.
     words = set(normalize(place).split())
-    for canteen in _LUNCH_CANTEENS:
+    for canteen in candidates:
         if canteen in words:
             return canteen
     return None
+
+
+def _name(slug: str) -> str:
+    return CANTEEN_NAMES[CANTEENS[slug]]
+
+
+def canteen_preferences(env=os.environ) -> tuple[tuple[str, ...], str]:
+    """Operator-set lunch candidates and fixed dinner canteen (never MCP arguments)."""
+    lunch = tuple(c.strip().lower() for c in env.get("MENZA_LUNCH_CANTEENS", "").split(",") if c.strip())
+    dinner = env.get("MENZA_DINNER_CANTEEN", "").strip().lower()
+    return lunch or DEFAULT_LUNCH_CANTEENS, dinner or DEFAULT_DINNER_CANTEEN
 
 
 def _meal_key(meal: Meal) -> tuple:
@@ -94,7 +107,8 @@ def _score(evidence: dict | None) -> list[int] | None:
 
 def suggest_plan(
     history: list[Transaction], menus: list[Meal], start: date, days: int = 14,
-    lunch_section: str = "lunch",
+    lunch_section: str = "lunch", lunch_canteens: tuple[str, ...] = DEFAULT_LUNCH_CANTEENS,
+    dinner_canteen: str = DEFAULT_DINNER_CANTEEN,
 ) -> dict:
     """Return lunch/dinner plans for every date from ``start`` (1–14 days).
 
@@ -110,15 +124,19 @@ def suggest_plan(
         raise ValueError("days must be an integer between 1 and 14")
     if lunch_section not in ("lunch", "lunch_no_soup"):
         raise ValueError("lunch_section must be 'lunch' or 'lunch_no_soup'")
+    lunch_canteens = tuple(lunch_canteens)
+    if not lunch_canteens or any(c not in CANTEENS for c in (*lunch_canteens, dinner_canteen)):
+        raise ValueError(f"canteens must be among {', '.join(CANTEENS)}")
+    lunch_ids = {CANTEENS[c] for c in lunch_canteens}
 
     lunches = [t for t in history if t.kind == "Obědy" and t.amount < 0]
     dinners = [t for t in history if t.kind == "Večeře" and t.amount < 0]
-    overall = Counter(_place(t.place) for t in lunches)
-    by_weekday = Counter((_place(t.place), t.when.weekday()) for t in lunches)
-    has_lunch_location_history = any(overall[c] for c in _LUNCH_CANTEENS)
+    overall = Counter(_place(t.place, lunch_canteens) for t in lunches)
+    by_weekday = Counter((_place(t.place, lunch_canteens), t.when.weekday()) for t in lunches)
+    has_lunch_location_history = any(overall[c] for c in lunch_canteens)
     dinner_evidence = {
-        "canteen_basis": "fixed",
-        "canteen_counts": {"harcov": sum(_place(t.place) == "harcov" for t in dinners)},
+        "canteen_basis": "configured",
+        "canteen_counts": {dinner_canteen: sum(_place(t.place) == dinner_canteen for t in dinners)},
     }
     grouped: dict[tuple[date, str], list[Meal]] = {}
     last = start + timedelta(days=days)
@@ -130,18 +148,18 @@ def suggest_plan(
     for offset in range(days):
         day = start + timedelta(days=offset)
         weekday = day.weekday()
-        has_weekday_history = any(by_weekday[c, weekday] for c in _LUNCH_CANTEENS)
-        rank = sorted(_LUNCH_CANTEENS, key=lambda c: (
+        has_weekday_history = any(by_weekday[c, weekday] for c in lunch_canteens)
+        rank = sorted(lunch_canteens, key=lambda c: (
             -by_weekday[c, weekday] if has_weekday_history else -overall[c],
-            -overall[c], _LUNCH_CANTEENS.index(c),
+            -overall[c], lunch_canteens.index(c),
         ))
         preferred = rank[0]
-        lunch_rows = [m for m in grouped.get((day, lunch_section), []) if m.canteen_id in (1, 2)]
-        dinner_rows = [m for m in grouped.get((day, "dinner"), []) if m.canteen_id == CANTEENS["harcov"]]
+        lunch_rows = [m for m in grouped.get((day, lunch_section), []) if m.canteen_id in lunch_ids]
+        dinner_rows = [m for m in grouped.get((day, "dinner"), []) if m.canteen_id == CANTEENS[dinner_canteen]]
 
         canteen_counts = {
             c: {"same_weekday_orders": by_weekday[c, weekday], "overall_orders": overall[c]}
-            for c in _LUNCH_CANTEENS
+            for c in lunch_canteens
         }
         basis = "same_weekday" if has_weekday_history else "overall"
         lunch_evidence = {"canteen_basis": basis, "canteen_counts": canteen_counts}
@@ -173,19 +191,19 @@ def suggest_plan(
             chosen, dish = _choose_dish(candidates, lunches) if candidates else (None, None)
             status = "available" if chosen and chosen.orderable else "unavailable"
             if not has_lunch_location_history and canteen == preferred:
-                canteen_reason = "No recorded lunch canteen orders; Harcov is the deterministic default."
+                canteen_reason = f"No recorded lunch canteen orders; {_name(preferred)} is the default."
             elif canteen == preferred:
                 canteen_reason = (
-                    f"{canteen.title()} chosen from {canteen_counts[canteen][basis + '_orders']} "
+                    f"{_name(canteen)} chosen from {canteen_counts[canteen][basis + '_orders']} "
                     f"{basis.replace('_', ' ')} lunch order(s)."
                 )
             else:
                 canteen_reason = (
-                    f"{preferred.title()} has no bookable {lunch_section} dishes; "
-                    f"{canteen.title()} has bookable dishes."
+                    f"{_name(preferred)} has no bookable {lunch_section} dishes; "
+                    f"{_name(canteen)} has bookable dishes."
                     if available else
-                    f"{preferred.title()} has no preorder {lunch_section} dishes; "
-                    f"{canteen.title()} lists an unavailable preorder dish."
+                    f"{_name(preferred)} has no preorder {lunch_section} dishes; "
+                    f"{_name(canteen)} lists an unavailable preorder dish."
                 )
             if chosen:
                 reason = f"{canteen_reason} {_dish_reason(dish, 'lunch')}"
@@ -196,7 +214,7 @@ def suggest_plan(
             else:
                 reason = f"{canteen_reason} No {lunch_section} menu listed; canteen may be closed."
             lunch = {
-                "status": status, "canteen": canteen.title(),
+                "status": status, "canteen": _name(canteen),
                 "meal": chosen.to_dict() if chosen else None,
                 "reason": reason, "evidence": {**lunch_evidence, **(dish or {})},
                 "score": _score(dish),
@@ -217,15 +235,16 @@ def suggest_plan(
             chosen, dish = _choose_dish(candidates, dinners) if candidates else (None, None)
             status = "available" if chosen and chosen.orderable else "unavailable"
             if chosen:
-                reason = f"Dinner is always at Harcov. {_dish_reason(dish, 'dinner')}"
+                reason = f"Dinner is always at {_name(dinner_canteen)}. {_dish_reason(dish, 'dinner')}"
                 if status == "unavailable":
                     reason += " This dish is not bookable (sold out or ordering unavailable)."
             elif dinner_rows:
-                reason = "Dinner is always at Harcov. Only direct-sale dishes listed; no dinner preorder available."
+                reason = (f"Dinner is always at {_name(dinner_canteen)}. Only direct-sale dishes listed; "
+                          "no dinner preorder available.")
             else:
-                reason = "Dinner is always at Harcov. No dinner menu listed; canteen may be closed."
+                reason = f"Dinner is always at {_name(dinner_canteen)}. No dinner menu listed; canteen may be closed."
             dinner = {
-                "status": status, "canteen": "Harcov", "meal": chosen.to_dict() if chosen else None,
+                "status": status, "canteen": _name(dinner_canteen), "meal": chosen.to_dict() if chosen else None,
                 "reason": reason, "evidence": {**dinner_evidence, **(dish or {})},
                 "score": _score(dish),
             }

@@ -8,7 +8,7 @@ Unofficial MCP server for **https://menza.tul.cz/**. Built for Hermes Agent, usa
 - Buy one selected meal within an explicit price cap; cancel within the refund window.
 - Offer your own meal on burza after the refund cutoff, or withdraw an unsold offer.
 - Historical spending and favourite dishes.
-- Suggestions for lunch and dinner for up to 14 days: dinner at Harcov, lunch Harcov/Husova inferred from weekday history, dishes ranked by exact past orders then overlapping dish-name words. Counts and reasons are returned, not claims about dietary preferences. Suggestions never buy anything. Lunch includes soup by default; select `lunch_no_soup` explicitly for the other variant. Missing menus remain unavailable.
+- Suggestions for lunch and dinner for up to 14 days: dinner at one fixed canteen, lunch canteen inferred from weekday history among the allowed lunch canteens, dishes ranked by exact past orders then overlapping dish-name words. The canteens default to the author's habits (dinner Harcov, lunch Harcov/Husova); to change them, add `MENZA_DINNER_CANTEEN` and `MENZA_LUNCH_CANTEENS` (comma-separated `harcov`, `husova`, `voronezska`, `komenskeho`) to the `env -i` line of the root-owned launcher `deploy/menza-mcp`. Counts and reasons are returned, not claims about dietary preferences. Suggestions never buy anything. Lunch includes soup by default; select `lunch_no_soup` explicitly for the other variant. Missing menus remain unavailable.
 - Persistent burza watches with exact dish/section/canteen/date matching, a maximum price and expiry. A separate worker polls about every 20 seconds. Network delays and competing buyers mean neither instant purchase nor success is guaranteed. Inspect `list_watches` for outcomes.
 
 This uses the same website as a person, not an official API. University/site changes can break it. Minutky are **direct-sale only**: listing the published menu does not guarantee stock or reserve them.
@@ -67,7 +67,7 @@ Suggested layout:
 /usr/local/libexec/menza-mcp         root-owned, 0755 (deploy/menza-mcp)
 ```
 
-Install the package with `/opt/menza-hermes/.venv/bin/pip install /opt/menza-hermes` (not editable). Install `deploy/menza-watcher.service` as a system service and enable it. It survives gateway restarts; authentication failures stop it for operator intervention.
+Install the package with `/opt/menza-hermes/.venv/bin/pip install /opt/menza-hermes` (not editable). Install `deploy/menza-watcher.service` as a system service and enable it. It survives gateway restarts; authentication failures stop it for operator intervention. After upgrading, restart the watcher **and** the MCP host (e.g. the Hermes gateway): a stdio MCP server keeps running the code it started with until its host respawns it.
 
 The sudoers entry must permit **no arguments** (the final `""` matters):
 

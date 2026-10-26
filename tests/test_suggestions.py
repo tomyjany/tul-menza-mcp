@@ -5,7 +5,7 @@ from datetime import date, datetime
 import pytest
 
 from menza_hermes.models import Meal, Transaction
-from menza_hermes.suggestions import suggest_plan
+from menza_hermes.suggestions import canteen_preferences, suggest_plan
 
 MONDAY = date(2026, 10, 26)
 
@@ -21,6 +21,23 @@ def meal(
 ) -> Meal:
     return Meal(day, canteen, section, "1", name, 88.0, "300 g", menu_id,
                 order_id, direct_sale_only, None, None)
+
+
+def test_operator_configured_canteens_replace_author_defaults():
+    lunch_canteens, dinner_canteen = canteen_preferences(
+        {"MENZA_LUNCH_CANTEENS": " Voronezska,komenskeho ", "MENZA_DINNER_CANTEEN": "komenskeho"})
+    assert (lunch_canteens, dinner_canteen) == (("voronezska", "komenskeho"), "komenskeho")
+    history = [purchase(date(2026, 10, 19), "Obědy", "Rizoto", "Menza Komenského"),
+               purchase(date(2026, 10, 12), "Obědy", "Rizoto", "Harcov")]
+    menus = [meal(MONDAY, "Rizoto", 1), meal(MONDAY, "Rizoto", 4), meal(MONDAY, "Pizza", 3),
+             meal(MONDAY, "Harcov dinner", 1, "dinner"), meal(MONDAY, "Komenského dinner", 4, "dinner")]
+    day = suggest_plan(history, menus, MONDAY, 1, lunch_canteens=lunch_canteens,
+                       dinner_canteen=dinner_canteen)["plan"][0]
+    assert (day["lunch"]["canteen"], day["lunch"]["meal"]["canteen_id"]) == ("Komenského", 4)
+    assert day["dinner"]["meal"]["name"] == "Komenského dinner"
+    assert canteen_preferences({}) == (("harcov", "husova"), "harcov")
+    with pytest.raises(ValueError, match="canteens"):
+        suggest_plan([], [], MONDAY, 1, dinner_canteen="liberec")
 
 
 def test_weekday_lunch_location_and_fixed_harcov_dinner():

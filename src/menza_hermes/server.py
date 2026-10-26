@@ -11,7 +11,7 @@ from .client import MenzaError
 from .models import PRAGUE, canteen_slug
 from .runtime import account
 from .stats import compute_stats
-from .suggestions import suggest_plan
+from .suggestions import canteen_preferences, suggest_plan
 from .watcher import Watches, price_limit
 
 mcp = MCPServer("menza-hermes", instructions=(
@@ -110,20 +110,24 @@ def meal_statistics(since: str | None = None, until: str | None = None) -> dict:
 
 @tool
 def suggest_meals(days: int = 14, start: str | None = None, lunch_section: str = "lunch") -> dict:
-    """Suggest lunch + dinner for each day, never buy. Dinner Harcov; lunch Harcov/Husova inferred
-    from history. Rank dishes by previous orders. No timeslots. lunch includes soup by default;
-    choose lunch_no_soup explicitly. Missing/closed menus remain unavailable, not invented."""
+    """Suggest lunch + dinner for each day, never buy. Dinner at the operator-configured canteen
+    (default Harcov); lunch canteen inferred from history among configured ones (default
+    Harcov/Husova). Rank dishes by previous orders. No timeslots. lunch includes soup by
+    default; choose lunch_no_soup explicitly. Missing/closed menus remain unavailable, not invented.
+    start must be today..today+13 and start+days-1 at most today+14."""
     first = day_value(start)
     today = datetime.now(PRAGUE).date()
     if not 1 <= days <= 14 or first < today or first + timedelta(days=days - 1) > today + timedelta(days=14):
         raise ValueError("Plan must cover 1..14 days within the next 14 days")
+    lunch_canteens, dinner_canteen = canteen_preferences()
     with account() as client:
         history = client.history(today - timedelta(days=730), today)
         menus = []
         for i in range(days):
-            for canteen in ("harcov", "husova"):
+            for canteen in dict.fromkeys((*lunch_canteens, dinner_canteen)):
                 menus.extend(client.day(canteen, first + timedelta(days=i)))
-        return suggest_plan(history, menus, first, days, lunch_section=lunch_section)
+        return suggest_plan(history, menus, first, days, lunch_section=lunch_section,
+                            lunch_canteens=lunch_canteens, dinner_canteen=dinner_canteen)
 
 
 @tool
