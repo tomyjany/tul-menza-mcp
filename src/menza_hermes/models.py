@@ -50,6 +50,16 @@ def section_key(header: str) -> str:
     return SECTION_KEYS.get(header, normalize(header).replace(" ", "_"))
 
 
+def meal_slot(section: str) -> str:
+    """Menu section -> purchase slot; both lunch variants are one lunch."""
+    return "dinner" if section == "dinner" else "lunch"
+
+
+def order_slot(kind: str) -> str:
+    """Orders-page CSS class -> slot. "vec" is dinner; anything else counts as lunch (stricter)."""
+    return "dinner" if kind == "vec" else "lunch"
+
+
 @dataclass(frozen=True)
 class Meal:
     """One dish row on a day menu."""

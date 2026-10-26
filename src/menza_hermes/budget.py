@@ -4,7 +4,8 @@ The MCP host (an LLM agent) can pass confirmed=true by itself, so confirmation i
 authentication. These bounds limit what a confused or prompt-injected host can buy, while
 still allowing a confirmed 14-day plan of one lunch + one dinner per day:
 
-* at most ``per_slot`` purchases per served date and meal slot (lunch / dinner);
+* at most ``per_slot`` orders per served date and meal slot (lunch / dinner), counting
+  active site orders made elsewhere (web, app, older server) as well as own purchases;
 * at most ``max_meal_czk`` per meal;
 * at most ``max_czk_14d`` spent in any rolling 14 days.
 
@@ -22,16 +23,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from .client import MenzaError
-from .models import PRAGUE, Meal
+from .models import PRAGUE, Meal, meal_slot
 
 DEFAULT_PER_SLOT = 1
 DEFAULT_MAX_MEAL_CZK = 150.0
 DEFAULT_MAX_CZK_14D = 2000.0
 WINDOW = timedelta(days=14)
-
-
-def meal_slot(section: str) -> str:
-    return "dinner" if section == "dinner" else "lunch"
 
 
 class SpendGuard:
@@ -62,8 +59,12 @@ class SpendGuard:
         return {"spent_14d": round(spent, 2), "max_czk_14d": self.max_czk_14d,
                 "max_meal_czk": self.max_meal_czk, "max_per_meal_slot_per_day": self.per_slot}
 
-    def reserve(self, meal: Meal, now: datetime | None = None) -> int:
-        """Record an intended purchase or raise MenzaError if it would exceed a bound."""
+    def reserve(self, meal: Meal, now: datetime | None = None, existing_order_ids=()) -> int:
+        """Record an intended purchase or raise MenzaError if it would exceed a bound.
+
+        ``existing_order_ids`` are active site orders for the same date and slot, including ones
+        placed on the web/app or by an older server, so they count even without a reservation.
+        """
         now = now or datetime.now(PRAGUE)
         if meal.price is None:
             raise MenzaError("meal price unknown; refusing to buy")
@@ -71,10 +72,12 @@ class SpendGuard:
             raise MenzaError(f"meal costs {meal.price:.2f} Kč, above the per-meal limit {self.max_meal_czk:.2f} Kč")
         slot = meal_slot(meal.section)
         with self._db() as db:
-            same = db.execute("SELECT COUNT(*) FROM reservations WHERE released=0 AND served=? AND slot=?",
-                              (meal.date.isoformat(), slot)).fetchone()[0]
+            own = [r[0] for r in db.execute(
+                "SELECT order_id FROM reservations WHERE released=0 AND served=? AND slot=?",
+                (meal.date.isoformat(), slot))]
+            same = len(set(existing_order_ids) | {o for o in own if o is not None}) + own.count(None)
             if same >= self.per_slot:
-                raise MenzaError(f"limit: already {same} {slot} purchase(s) for {meal.date.isoformat()}; "
+                raise MenzaError(f"limit: already {same} {slot} order(s) for {meal.date.isoformat()}; "
                                  "cancel that one first (a confirmed refund frees the slot)")
             spent = db.execute("SELECT COALESCE(SUM(price), 0) FROM reservations WHERE released=0 AND at > ?",
                                ((now - WINDOW).isoformat(),)).fetchone()[0]

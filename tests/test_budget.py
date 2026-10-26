@@ -28,10 +28,19 @@ def test_second_lunch_for_same_date_is_refused_but_dinner_is_not(tmp_path):
     guard = SpendGuard(tmp_path)
     guard.reserve(meal(3, "lunch"), NOW)
     guard.reserve(meal(3, "dinner"), NOW)
-    with pytest.raises(MenzaError, match="lunch purchase"):
+    with pytest.raises(MenzaError, match="lunch order"):
         guard.reserve(meal(3, "lunch_no_soup"), NOW)  # soup variant is still a lunch
-    with pytest.raises(MenzaError, match="dinner purchase"):
+    with pytest.raises(MenzaError, match="dinner order"):
         guard.reserve(meal(3, "dinner"), NOW)
+
+
+def test_site_orders_count_once_alongside_own_purchases(tmp_path):
+    guard = SpendGuard(tmp_path, per_slot=2)
+    guard.confirm(guard.reserve(meal(5), NOW), order_id=77)
+    guard.reserve(meal(5), NOW, existing_order_ids=[77])  # 77 is our own order, not a second one
+    (tmp_path / "web").mkdir()
+    with pytest.raises(MenzaError, match="already 2 lunch"):  # both made on the web, none reserved here
+        SpendGuard(tmp_path / "web", per_slot=2).reserve(meal(5), NOW, existing_order_ids=[77, 88])
 
 
 def test_per_meal_price_and_14_day_amount(tmp_path):

@@ -15,7 +15,7 @@ from pathlib import Path
 import requests
 
 from .auth import BASE_URL, login
-from .models import PRAGUE, Meal, Order, Transaction, canteen_slug
+from .models import PRAGUE, Meal, Order, Transaction, canteen_slug, meal_slot, order_slot
 from .parser import is_logged_in, parse_balance, parse_day, parse_history, parse_orders
 
 USER_AGENT = "menza-hermes/0.1 (+https://github.com/tomyjany/tul-menza-mcp)"
@@ -185,6 +185,11 @@ class MenzaClient:
             raise MenzaError("meal price is unavailable; cannot place an order")
         if max_price is not None and (not math.isfinite(max_price) or max_price < 0 or meal.price > max_price):
             raise MenzaError("current meal price exceeds the authorized maximum")
+        held = ()
+        if self._spend_guard is not None:
+            # Orders from the web/app or an older server have no reservation; count them too.
+            held = [o.order_id for o in self.orders() if o.order_id is not None and o.date == day
+                    and order_slot(o.kind) == meal_slot(meal.section)]
         # Recheck the live menu immediately before submitting the POST, including price.
         fresh = next((m for m in self.day(slug, day) if m.menu_id == menu_id), None)
         if fresh is None or not _same_meal(meal, fresh) or fresh.price != meal.price:
@@ -193,7 +198,8 @@ class MenzaClient:
             return fresh
         if not fresh.orderable or fresh.buy_until is None or fresh.phase(datetime.now(PRAGUE)) == "closed":
             raise MenzaError("meal is no longer open for ordering")
-        reservation = self._spend_guard.reserve(fresh) if self._spend_guard is not None else None
+        reservation = (self._spend_guard.reserve(fresh, existing_order_ids=held)
+                       if self._spend_guard is not None else None)
         uncertain = False
         try:
             self._action(f"/{slug}/{day.isoformat()}/",

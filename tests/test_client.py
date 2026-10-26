@@ -64,19 +64,34 @@ def client(tmp_path, reads, writes=()):
     return c
 
 
-def test_site_refusal_frees_budget_but_uncertain_outcome_keeps_it(tmp_path):
+def test_site_refusal_frees_budget_but_uncertain_outcome_keeps_it(tmp_path, monkeypatch):
     from menza_hermes.budget import SpendGuard
+    monkeypatch.setattr('menza_hermes.client._today', lambda: DAY)
     guard = SpendGuard(tmp_path)
-    refused = client(tmp_path, [menu(), menu()], [response('Sold out', status=412)])
+    refused = client(tmp_path, [menu(), orders(), menu()], [response('Sold out', status=412)])
     refused._spend_guard = guard
     with pytest.raises(MenzaError, match='refused'):
         refused.order('harcov', DAY, 7, max_price=100)
     assert guard.usage()['spent_14d'] == 0
-    unsure = client(tmp_path, [menu(), menu(), menu()], [requests.Timeout('x')])
+    unsure = client(tmp_path, [menu(), orders(), menu(), menu()], [requests.Timeout('x')])
     unsure._spend_guard = guard
     with pytest.raises(MenzaError, match='uncertain'):
         unsure.order('harcov', DAY, 7, max_price=100)
     assert guard.usage()['spent_14d'] == 58.84
+
+
+def test_lunch_ordered_outside_the_server_fills_the_slot(tmp_path, monkeypatch):
+    from menza_hermes.budget import SpendGuard
+    monkeypatch.setattr('menza_hermes.client._today', lambda: DAY)
+    guard = SpendGuard(tmp_path)  # no reservations: the existing order came from the web/app
+    c = client(tmp_path, [menu(), orders(active=True), menu()])
+    c._spend_guard = guard
+    with pytest.raises(MenzaError, match='already 1 lunch'):
+        c.order('harcov', DAY, 7, max_price=100)
+    assert not c.session.posts and guard.usage()['spent_14d'] == 0
+    offered = client(tmp_path, [menu(), orders(exchange=True), menu(), menu(ordered=True)], [''])
+    offered._spend_guard = guard  # a meal offered on burza is no longer held
+    assert offered.order('harcov', DAY, 7, max_price=100).order_id == 13
 
 
 def test_history_post_accepts_table_only_fragment_without_logged_in_nav(tmp_path):
