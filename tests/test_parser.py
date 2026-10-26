@@ -36,6 +36,12 @@ def test_menu_critical_data_must_not_be_silently_accepted(page):
         parse_day(page, DAY)
 
 
+def test_explicit_closed_day_notice_is_an_empty_menu():
+    page = ('<div role="main" id="main"><p>Pro zvolený termín a nastavené skupiny jídel '
+            'není dostupný jídelníček</p></div>')
+    assert parse_day(page, DAY) == []
+
+
 def test_order_row_requires_date_and_valid_id():
     assert parse_orders(orders(), DAY)[0].order_id == 13
     for page in (orders(oid="garbage"), orders().replace("26.10.", "99.10."),

@@ -102,6 +102,10 @@ def parse_day(html: str, day: date) -> list[Meal]:
                 allergens=[sp.get("title", "").split(":", 1)[-1].strip() for sp in art.select("#alg span")],
             ))
     if not soup.find("section"):
+        main = soup.find(id="main")
+        # Weekends/closed days show an explicit notice; anything else is a site change.
+        if main is not None and "není dostupný jídelníček" in _text(main):
+            return []
         raise ValueError("menu sections missing")
     return meals
 
