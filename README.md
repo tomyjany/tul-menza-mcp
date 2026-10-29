@@ -4,7 +4,7 @@ Unofficial MCP server for **https://menza.tul.cz/**. Built for Hermes Agent, usa
 
 ## Features
 
-- Menu, published minutky, current orders, account credit and consumed-meal history.
+- Menu, published minutky, current orders, account credit and consumed-meal history. The order list includes today's `dnes` section and dated future sections; `dnes` uses the request date in Europe/Prague.
 - Buy one selected meal within an explicit price cap; cancel within the refund window.
 - Offer your own meal on burza after the refund cutoff, or withdraw an unsold offer.
 - Historical spending and favourite dishes.

@@ -114,22 +114,26 @@ _DAY = re.compile(r"(\d{1,2})\.(\d{1,2})\.")
 
 
 def parse_orders(html: str, today: date) -> list[Order]:
-    """Upcoming orders ('Objednávky' page). Section headers look like '06.11. pátek'."""
+    """Upcoming orders; headers are 'dnes' (today) or a date such as '06.11. pátek'."""
     soup = BeautifulSoup(html, "html.parser")
     orders: list[Order] = []
     for sec in soup.find_all("section"):
         header = sec.find("header")
-        m = _DAY.search(_text(header)) if header else None
-        if not m:
-            if sec.find(attrs={"data-order-id": True}) or sec.find(attrs={"data-exchange-id": True}):
-                raise ValueError("order date missing")
-            continue
-        try:
-            d = date(today.year, int(m.group(2)), int(m.group(1)))
-        except ValueError:
-            raise ValueError("invalid order date") from None
-        if d < today and (today - d).days > 180:  # header has no year; December -> January rollover
-            d = d.replace(year=today.year + 1)
+        heading = _text(header) if header else ""
+        if heading.casefold() == "dnes":
+            d = today
+        else:
+            m = _DAY.search(heading)
+            if not m:
+                if sec.find(attrs={"data-order-id": True}) or sec.find(attrs={"data-exchange-id": True}):
+                    raise ValueError("order date missing")
+                continue
+            try:
+                d = date(today.year, int(m.group(2)), int(m.group(1)))
+            except ValueError:
+                raise ValueError("invalid order date") from None
+            if d < today and (today - d).days > 180:  # header has no year; December -> January rollover
+                d = d.replace(year=today.year + 1)
         for art in sec.find_all("article"):
             oid, xid = art.get("data-order-id"), art.get("data-exchange-id")
             if not oid and not xid:

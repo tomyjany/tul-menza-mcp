@@ -50,6 +50,24 @@ def test_order_row_requires_date_and_valid_id():
             parse_orders(page, DAY)
 
 
+@pytest.mark.parametrize("today,future_header,future", [
+    (date(2026, 10, 29), "30.10. pátek", date(2026, 10, 30)),
+    (date(2026, 12, 31), "02.01. sobota", date(2027, 1, 2)),
+])
+@pytest.mark.parametrize("oid,xid", [("13", ""), ("", "91")])
+def test_today_header_preserves_current_orders_offers_and_future_dates(today, future_header, future, oid, xid):
+    page = (
+        '<section class="r"><header><h1>Jak vám chutnalo</h1></header></section>'
+        + orders(oid=oid, xid=xid).replace("26.10. pondělí", "<h1>dnes</h1>")
+        + orders(oid="14").replace("26.10. pondělí", future_header)
+    )
+    result = parse_orders(page, today)
+    assert [(o.date, o.order_id, o.exchange_id) for o in result] == [
+        (today, int(oid) if oid else None, int(xid) if xid else None),
+        (future, 14, None),
+    ]
+
+
 def test_balance_requires_actual_balance():
     with pytest.raises(ValueError):
         parse_balance("<dd><span>Dostupné bony </span>10 ks</dd>")
